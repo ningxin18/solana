@@ -24,8 +24,7 @@ use solana_sdk::signer::keypair::{ Keypair, write_keypair_file, read_keypair_fil
 use solana_sdk::pubkey::{ Pubkey, read_pubkey_file, write_pubkey_file };
 use std::thread;
 
-// const SOLANA_CLIENT_URL: &'static str = "https://api.devnet.solana.com";
-const SOLANA_CLIENT_URL: &'static str = "http://localhost:8899";
+const SOLANA_CLIENT_URL: &'static str = "127.0.0.1:1024";
 const WALLET_FILE_PATH: &'static str = "~/.config/solana/id.json";
 
 pub enum Command {
@@ -45,6 +44,15 @@ pub enum Command {
 
 pub fn start(rpc_url: String, rpc_client: RpcClient, cmd: Command) -> anyhow::Result<()> {
 
+    let entry_point = solana_net_utils::parse_host_port(SOLANA_CLIENT_URL).unwrap();
+    let nodes = discover_cluster(&entry_point, 1, SocketAddrSpace::Unspecified)
+        .unwrap_or_else(|err| {
+            eprintln!("Failed to discover {} nodes: {:?}", 1, err);
+            exit(1);
+        });
+
+    let client = Arc::new(get_client(&nodes, &SocketAddrSpace::Unspecified));
+
     match cmd {
         Command::CreateKeypair {
             number,
@@ -62,16 +70,6 @@ pub fn start(rpc_url: String, rpc_client: RpcClient, cmd: Command) -> anyhow::Re
         Command::MintAccount {
             number,
         } => {
-            let entry_point = solana_net_utils::parse_host_port("127.0.0.1:1024").unwrap();
-            let nodes = discover_cluster(&entry_point, 1, SocketAddrSpace::Unspecified)
-                .unwrap_or_else(|err| {
-                    eprintln!("Failed to discover {} nodes: {:?}", 1, err);
-                    exit(1);
-                });
-
-            let client = Arc::new(get_client(&nodes, &SocketAddrSpace::Unspecified));
-
-
             let wallet_keypair = read_keypair_file(&*shellexpand::tilde(WALLET_FILE_PATH)).expect("Need a payer");
             let wallet_pubkey: Pubkey = wallet_keypair.pubkey();
             println!("Wallet Pubkey: {}", wallet_pubkey);
@@ -116,6 +114,7 @@ pub fn start(rpc_url: String, rpc_client: RpcClient, cmd: Command) -> anyhow::Re
         } => {
             let mut handles = vec![];
 
+
             for i in 0..number {
                 let s = format!("{}.keypair", i);
                 let keypair = read_keypair_file(&*shellexpand::tilde(&s)).unwrap();
@@ -129,22 +128,15 @@ pub fn start(rpc_url: String, rpc_client: RpcClient, cmd: Command) -> anyhow::Re
                        "FzoWnVqUqpakUW7CbokFTWsnJr6uzphSWtei9JYDSF7e".parse()?
                     };
 
+
+                let client2 = client.clone();
+                let rpc_client = RpcClient::new(rpc_url.to_string());
+
                 let handle = thread::spawn(move || {
-                    let entry_point = solana_net_utils::parse_host_port("127.0.0.1:1024").unwrap();
-                    let nodes = discover_cluster(&entry_point, 1, SocketAddrSpace::Unspecified)
-                        .unwrap_or_else(|err| {
-                            eprintln!("Failed to discover {} nodes: {:?}", 1, err);
-                            exit(1);
-                        });
-
-                    let client = Arc::new(get_client(&nodes, &SocketAddrSpace::Unspecified));
-
-                    let rpc_client2 = RpcClient::new(SOLANA_CLIENT_URL.to_string());
-
                     let mut counter = 0;
                     let mut rng = rand::thread_rng();
                     for i in 0..100000 {
-                        let y: u64 = rng.gen_range(10, 2000);
+                        let y: u64 = rng.gen_range(1, 200);
 
                         let transfer_instruction: Instruction =
                             solana_sdk::system_instruction::transfer(
@@ -153,7 +145,7 @@ pub fn start(rpc_url: String, rpc_client: RpcClient, cmd: Command) -> anyhow::Re
                                 y,
                             );
 
-                        let (recent_blockhash, _fee_calculator) = rpc_client2.get_recent_blockhash().unwrap();
+                        let (recent_blockhash, _fee_calculator) = rpc_client.get_recent_blockhash().unwrap();
 
                         let transaction: Transaction =
                             Transaction::new_signed_with_payer(
@@ -172,7 +164,7 @@ pub fn start(rpc_url: String, rpc_client: RpcClient, cmd: Command) -> anyhow::Re
                         //     .. RpcSendTransactionConfig::default()
                         // };
 
-                        let result = client.async_send_transaction(transaction);
+                        let result = client2.async_send_transaction(transaction);
                         counter = counter + 1;
                         println!("'Transfer' Transaction Result:{}, {}, {:?}", keypair.pubkey(), counter, result);
                     }
