@@ -1,0 +1,7 @@
+[workspace]
+members = [
+"spl",
+"spl-lib",
+    "crypto",
+    "sol-tps",
+]
